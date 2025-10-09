@@ -61,27 +61,24 @@ def store_attendance(name, id_):
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     attendance_cache['attendance'][id_] = {"name": name, "date_time": current_time}
 
-    # Save to file
+    # Save to JSON backup
     with open(json_file_path_attendance, 'w') as f:
         json.dump(attendance_cache, f, indent=4)
 
-    return f"Attendance stored for {name}"
-
-def export_to_excel():
+    # --- Save to Excel on Desktop ---
     rows = [{'ID': k, 'Name': v['name'], 'DateTime': v['date_time']} 
             for k, v in attendance_cache['attendance'].items()]
 
-    if not rows:
-        return
+    if rows:
+        df = pd.DataFrame(rows)
+        folder_path = r"C:\Users\Admin\OneDrive\Desktop\attendence"  # <-- Corrected path
+        os.makedirs(folder_path, exist_ok=True)
 
-    df = pd.DataFrame(rows)
-    folder_path = r"C:\Users\Admin\OneDrive\Desktop\attendence"
-    os.makedirs(folder_path, exist_ok=True)
+        file_name = f"{today_date}_Attendance.xlsx"
+        file_path = os.path.join(folder_path, file_name)
+        df.to_excel(file_path, index=False)
 
-    today = datetime.now().strftime("%Y-%m-%d")
-    file_name = f"{today}_Attendance.xlsx"
-    file_path = os.path.join(folder_path, file_name)
-    df.to_excel(file_path, index=False)
+    return f"Attendance stored for {name}"
 
 # ---------------------- Tkinter GUI ----------------------
 root = tk.Tk()
@@ -151,7 +148,7 @@ def update_frame():
         cv2.putText(frame, name, (left, top - 10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
-    # Convert frame to Tkinter image (fix Pillow >=10)
+    # Convert frame to Tkinter image
     img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
     if hasattr(Image, 'Resampling'):
         img = img.resize((640, 480), Image.Resampling.LANCZOS)
@@ -175,24 +172,13 @@ def exit_program():
     video_running = False
     vs.release()
     cv2.destroyAllWindows()
-    export_to_excel()
     root.quit()
 
 start_button = tk.Button(root, text="Start", font=("Arial", 16), bg="#00ff00", command=start_video)
 start_button.pack(pady=10)
 
-export_button = tk.Button(root, text="Export to Excel Now", font=("Arial", 16), bg="#00bfff", command=export_to_excel)
-export_button.pack(pady=10)
-
 exit_button = tk.Button(root, text="Exit", font=("Arial", 16), bg="#ff0000", command=exit_program)
 exit_button.pack(pady=10)
-
-# ---------------------- Auto Export ----------------------
-def auto_export_excel():
-    export_to_excel()
-    root.after(5*60*1000, auto_export_excel)  # every 5 minutes
-
-auto_export_excel()
 
 # ---------------------- Run Tkinter ----------------------
 root.mainloop()
