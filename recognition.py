@@ -3,101 +3,184 @@ from tkinter import messagebox
 import cv2
 import numpy as np
 from PIL import Image, ImageTk
-from datetime import datetime
+from datetime import datetime, time
 import pickle
 import json
 from tinydb import TinyDB
 import face_recognition
 from project.utils import Conf
-import pandas as pd
 import os
+from pymongo import MongoClient
+import threading
+import pyttsx3  # For voice alert
 
-# ---------------------- Load Configuration and Models ----------------------
+
 conf = Conf("config/config.json")
 recognizer = pickle.loads(open(conf["recognizer_path"], "rb").read())
 le = pickle.loads(open(conf["le_path"], "rb").read())
 
-# ---------------------- TinyDB and JSON Paths ----------------------
-db = TinyDB(conf["db_path"])
-studentTable = db.table("student")
-json_file_path_attendance = 'attendance.json'
 
-# ---------------------- Video Capture ----------------------
+client = MongoClient("mongodb+srv://smartmess:smartmessdev2025@cluster0.vhgy1fm.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0")
+db = client["test"]
+attendance_collection = db["AttendanceData"]
+
+
+db_local = TinyDB(conf["db_path"])
+studentTable = db_local.table("student")
+
+
 vs = cv2.VideoCapture(0, cv2.CAP_DSHOW)
 vs.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
 vs.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
 
-# ---------------------- Attendance cache ----------------------
-attendance_cache = {"attendance": {}}
 
-# Load existing attendance
+today_date = datetime.now().strftime("%Y-%m-%d")
+json_file_path_attendance = f"attendance_{today_date}.json"
+
+if not os.path.exists(json_file_path_attendance):
+    with open(json_file_path_attendance, 'w') as f:
+        json.dump({}, f, indent=4)
+
 try:
     with open(json_file_path_attendance, 'r') as f:
         attendance_cache = json.load(f)
-        if "attendance" not in attendance_cache:
-            attendance_cache = {"attendance": {}}
 except (FileNotFoundError, json.JSONDecodeError):
-    attendance_cache = {"attendance": {}}
+    attendance_cache = {}
 
-# ---------------------- Attendance Functions ----------------------
+
+def get_meal_mode(current_time=None):
+    if current_time is None:
+        current_time = datetime.now().time()
+    lunch_start, lunch_end = time(11, 45), time(14, 30)
+    dinner_start, dinner_end = time(19, 0), time(21, 30)
+
+    if lunch_start <= current_time <= lunch_end:
+        return "Lunch"
+    elif dinner_start <= current_time <= dinner_end:
+        return "Dinner"
+    else:
+        return "General"
+
+
+voice_lock = threading.Lock()
+engine = pyttsx3.init()
+engine.setProperty('rate', 180)
+engine.setProperty('volume', 1.0)
+
+def play_unknown_alert():
+    def speak():
+        with voice_lock:
+            engine.say("Unknown face detected. Please try again.")
+            engine.runAndWait()
+    threading.Thread(target=speak, daemon=True).start()
+
+
 def store_attendance(name, id_):
     if not name or name.lower() == "unknown":
-        return None
+        play_unknown_alert()
+        alert_label.config(text="⚠️ Unknown face detected!", fg="red")
+        root.after(2000, lambda: alert_label.config(text=""))
+        return "Unknown face detected — not stored."
 
-    today_date = datetime.now().strftime("%Y-%m-%d")
+    now = datetime.now()
+    current_time_str = now.strftime("%Y-%m-%d %H:%M:%S")
+    mode = get_meal_mode(now.time())
 
-    # Reset if day changed
-    last_dates = [v['date_time'].split(" ")[0] for v in attendance_cache['attendance'].values()]
-    last_date = last_dates[0] if last_dates else today_date
-    if last_date != today_date:
-        attendance_cache['attendance'] = {}
+    if "attendance" not in attendance_cache:
+        attendance_cache.clear()
+        attendance_cache["date_time"] = current_time_str
+        attendance_cache["mode"] = mode
+        attendance_cache["attendance"] = []
 
-    # Already recorded today?
-    if id_ in attendance_cache['attendance']:
-        recorded_date = attendance_cache['attendance'][id_]['date_time'].split(" ")[0]
-        if recorded_date == today_date:
-            return f"Attendance already recorded for {name} today."
+    if attendance_cache.get("mode") != mode:
+        attendance_cache.clear()
+        attendance_cache["date_time"] = current_time_str
+        attendance_cache["mode"] = mode
+        attendance_cache["attendance"] = []
 
-    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    attendance_cache['attendance'][id_] = {"name": name, "date_time": current_time}
+    for record in attendance_cache["attendance"]:
+        if record["id"] == id_:
+            return f"Attendance already recorded for {name} ({mode})."
 
-    # Save to JSON backup
+    attendance_cache["attendance"].append({
+        "id": id_,
+        "name": name
+    })
+
+    ordered_data = {
+        "date_time": attendance_cache["date_time"],
+        "mode": attendance_cache["mode"],
+        "attendance": attendance_cache["attendance"]
+    }
+
     with open(json_file_path_attendance, 'w') as f:
-        json.dump(attendance_cache, f, indent=4)
+        json.dump(ordered_data, f, indent=4)
 
-    # --- Save to Excel on Desktop ---
-    rows = [{'ID': k, 'Name': v['name'], 'DateTime': v['date_time']} 
-            for k, v in attendance_cache['attendance'].items()]
+    alert_label.config(text=f"✔ Attendance stored for {name} ({mode})", fg="green")
+    root.after(2000, lambda: alert_label.config(text=""))
+    return f"Attendance stored for {name} ({mode})"
 
-    if rows:
-        df = pd.DataFrame(rows)
-        folder_path = r"C:\Users\Admin\OneDrive\Desktop\attendence"  # <-- Corrected path
-        os.makedirs(folder_path, exist_ok=True)
 
-        file_name = f"{today_date}_Attendance.xlsx"
-        file_path = os.path.join(folder_path, file_name)
-        df.to_excel(file_path, index=False)
+def save_to_mongodb():
+    today_date = datetime.now().strftime("%Y-%m-%d")
+    if "attendance" not in attendance_cache or not attendance_cache["attendance"]:
+        messagebox.showwarning("No Data", "No attendance data available to save!")
+        return
 
-    return f"Attendance stored for {name}"
+    existing_doc = attendance_collection.find_one({"date": today_date})
+    students_list = []
+    existing_records = set()
 
-# ---------------------- Tkinter GUI ----------------------
+    if existing_doc:
+        existing_records = {s["ID"] for s in existing_doc["students"]}
+
+    for record in attendance_cache["attendance"]:
+        if record["id"] not in existing_records:
+            students_list.append({
+                "ID": record["id"],
+                "Name": record["name"],
+                "Mode": attendance_cache.get("mode", "Unknown"),
+                "DateTime": attendance_cache.get("date_time", "")
+            })
+
+    if not students_list:
+        messagebox.showinfo("Info", "All today's records already exist in MongoDB.")
+        return
+
+    if existing_doc:
+        attendance_collection.update_one(
+            {"date": today_date},
+            {"$push": {"students": {"$each": students_list}}}
+        )
+    else:
+        attendance_collection.insert_one({
+            "date": today_date,
+            "students": students_list
+        })
+
+    messagebox.showinfo("Success", f"✔ {len(students_list)} new records added for {today_date}.")
+
+
 root = tk.Tk()
 root.title("Smart Face Attendance System")
-root.geometry("800x700")
+root.geometry("850x720")
 
 attendance_label = tk.Label(root, text="Attendance Recognition: Ready", font=("Arial", 16))
-attendance_label.pack(pady=20)
+attendance_label.pack(pady=10)
+
+alert_label = tk.Label(root, text="", font=("Arial", 14))
+alert_label.pack(pady=5)
 
 canvas = tk.Canvas(root, width=640, height=480)
-canvas.pack()
+canvas.pack(pady=10)
 
 video_running = False
-FRAME_SKIP = 8  # Detect every 8 frames
+FRAME_SKIP = 8
 frame_count = 0
 last_boxes = []
 last_names = []
 
-# ---------------------- Frame Update ----------------------
+
 def update_frame():
     global video_running, frame_count, last_boxes, last_names
     if not video_running:
@@ -112,60 +195,60 @@ def update_frame():
     rgb_small = cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB)
 
     frame_count += 1
+
     if frame_count % FRAME_SKIP == 0:
-        boxes_small = face_recognition.face_locations(rgb_small, model=conf["detection_method"])
+
+        boxes_small = face_recognition.face_locations(rgb_small)
         encodings = face_recognition.face_encodings(rgb_small, boxes_small)
 
         last_boxes = []
         last_names = []
 
+        detected_faces = []   # NEW LIST for multi-face
+
         for encoding, box in zip(encodings, boxes_small):
             preds = recognizer.predict_proba([encoding])[0]
             j = np.argmax(preds)
-            curPerson = le.classes_[j]
+            confidence = preds[j]
 
-            # Lookup student name
-            result = studentTable.search(lambda doc: curPerson in doc)
-            name = result[0][curPerson][0] if result else "Unknown"
+            if confidence < 0.8:
+                name, curPerson = "Unknown", "Unknown"
+            else:
+                curPerson = le.classes_[j]
+                result = studentTable.search(lambda doc: curPerson in doc)
+                name = result[0][curPerson][0] if result else "Unknown"
 
+            detected_faces.append((name, curPerson, box))
+
+        # NOW store attendance for all faces together
+        for (name, curPerson, box) in detected_faces:
             attn_info = store_attendance(name, curPerson)
-            if attn_info:
-                attendance_label.config(text=f"Attendance Status: {attn_info}")
+            attendance_label.config(text=f"Status: {attn_info}")
 
-            # Scale box to original frame
-            top, right, bottom, left = box
-            top *= 2
-            right *= 2
-            bottom *= 2
-            left *= 2
-
+            top, right, bottom, left = [v * 2 for v in box]
             last_boxes.append((top, right, bottom, left))
             last_names.append(name)
 
-    # Draw rectangles and names
     for (top, right, bottom, left), name in zip(last_boxes, last_names):
-        cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 0), 2)
+        color = (0, 255, 0) if name != "Unknown" else (0, 0, 255)
+        cv2.rectangle(frame, (left, top), (right, bottom), color, 2)
         cv2.putText(frame, name, (left, top - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 
-    # Convert frame to Tkinter image
     img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-    if hasattr(Image, 'Resampling'):
-        img = img.resize((640, 480), Image.Resampling.LANCZOS)
-    else:
-        img = img.resize((640, 480), Image.ANTIALIAS)
-
+    img = img.resize((640, 480), Image.Resampling.LANCZOS)
     img_tk = ImageTk.PhotoImage(image=img)
     canvas.create_image(0, 0, anchor="nw", image=img_tk)
     canvas.image = img_tk
 
     root.after(50, update_frame)
 
-# ---------------------- Buttons ----------------------
+
 def start_video():
     global video_running
     video_running = True
     update_frame()
+
 
 def exit_program():
     global video_running
@@ -174,15 +257,20 @@ def exit_program():
     cv2.destroyAllWindows()
     root.quit()
 
-start_button = tk.Button(root, text="Start", font=("Arial", 16), bg="#00ff00", command=start_video)
-start_button.pack(pady=10)
 
-exit_button = tk.Button(root, text="Exit", font=("Arial", 16), bg="#ff0000", command=exit_program)
-exit_button.pack(pady=10)
+button_frame = tk.Frame(root)
+button_frame.pack(pady=15)
 
-# ---------------------- Run Tkinter ----------------------
+start_button = tk.Button(button_frame, text="Start", font=("Arial", 16), bg="#00cc66", command=start_video)
+start_button.grid(row=0, column=0, padx=10)
+
+save_button = tk.Button(button_frame, text="Save to Database", font=("Arial", 16), bg="#007bff", fg="white", command=save_to_mongodb)
+save_button.grid(row=0, column=1, padx=10)
+
+exit_button = tk.Button(button_frame, text="Exit", font=("Arial", 16), bg="#ff3333", command=exit_program)
+exit_button.grid(row=0, column=2, padx=10)
+
 root.mainloop()
 
-# Cleanup
 vs.release()
 cv2.destroyAllWindows()

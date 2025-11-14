@@ -7,26 +7,26 @@ import cv2
 import os 
 import threading
 
-# Create required directories if not exist
+
 if not os.path.exists("dataset"):
     os.mkdir("dataset")
 if not os.path.exists("dataset/PROJECT"):
     os.mkdir("dataset/PROJECT")   
 
-# Stop event to indicate if enrollment should be stopped
+
 stop_event = threading.Event()
 
-# Function to handle enrollment process
-def enroll_student():
-    stop_event.clear()  # Reset stop event each time process starts
-    enroll_button.config(state=tk.DISABLED)  # Disable enroll button to prevent multiple submissions
 
-    # Retrieve input values
+def enroll_student():
+    stop_event.clear()  
+    enroll_button.config(state=tk.DISABLED)  
+
+    
     student_id = entry_id.get().strip()
     student_name = entry_name.get().strip()
     config_file = config_path.get().strip()
 
-    # Validate input
+  
     if not student_id or not student_name:
         messagebox.showerror("Input Error","Please provide Name and ID")
         enroll_button.config(state=tk.NORMAL)
@@ -40,14 +40,14 @@ def enroll_student():
         enroll_button.config(state=tk.NORMAL)
         return
 
-    # Load configuration
+  
     conf = Conf(config_file)
 
-    # Initialize database
+    
     db = TinyDB(conf["db_path"])
     student_table = db.table("student")
 
-    # Check if student is already enrolled
+    
     for record in student_table.all():
         for sub_key in record:
             if student_id == sub_key:
@@ -56,7 +56,7 @@ def enroll_student():
                 enroll_button.config(state=tk.NORMAL)
                 return
 
-    # Thread for face enrollment
+    
     def process_enrollment():
         try:
             vs = cv2.VideoCapture(0, cv2.CAP_DSHOW)
@@ -78,7 +78,7 @@ def enroll_student():
                 boxes = face_recognition.face_locations(rgb_frame, model=conf["detection_method"])
                 frame_copy = frame.copy()
 
-                # Draw boxes and save faces
+                
                 for (top, right, bottom, left) in boxes:
                     cv2.rectangle(frame, (left, top), (right, bottom), (0,0,255), 2)
 
@@ -114,21 +114,21 @@ def enroll_student():
 
     threading.Thread(target=process_enrollment, daemon=True).start()
 
-# Exit program
+
 def exit_program():
     root.quit()
 
-# Update progress bar
+
 def update_progress(total_saved, total_faces):
     progress_bar["value"] = (total_saved / total_faces) * 100
     percentage_label.config(text=f"{int((total_saved / total_faces) * 100)}%")
 
-# Stop enrollment process
+
 def stop_enrollment():
     stop_event.set()
     messagebox.showinfo("Stopping", "Stopping the enrollment process.")
 
-# Reset form
+
 def reset_form():
     entry_id.delete(0, tk.END)
     entry_name.delete(0, tk.END)
@@ -136,7 +136,7 @@ def reset_form():
     percentage_label.config(text="0%")
     messagebox.showinfo("Reset", "Form cleared.")
 
-# Browse config file
+
 def browse_config():
     file_path = filedialog.askopenfilename(title="Select Config File", filetypes=[("JSON files", "*.json"), ("All files", "*.*")])
     if file_path:
@@ -145,7 +145,7 @@ def browse_config():
         config_path.insert(0, file_path)
         config_path.config(state=tk.DISABLED)
 
-# Gradient background
+
 def draw_gradient(canvas, width, height):
     canvas.delete("gradient")
     for i in range(256):
@@ -154,7 +154,7 @@ def draw_gradient(canvas, width, height):
         y2 = int((i+1) * height / 256)
         canvas.create_rectangle(0, y1, width, y2, fill=color, outline="", tags="gradient")
 
-# Tkinter window
+
 root = tk.Tk()
 root.title("Face Enrollment")
 root.geometry("800x600")

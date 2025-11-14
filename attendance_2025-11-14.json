@@ -1,0 +1,22 @@
+{
+    "date_time": "2025-11-14 12:50:30",
+    "mode": "Lunch",
+    "attendance": [
+        {
+            "id": "01",
+            "name": "Aditya Mulik"
+        },
+        {
+            "id": "03",
+            "name": "Vivek Virkar"
+        },
+        {
+            "id": "04",
+            "name": "Jaydip Jadhav"
+        },
+        {
+            "id": "02",
+            "name": "Swapnil Salekar"
+        }
+    ]
+}

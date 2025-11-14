@@ -14,11 +14,11 @@ def encode_faces():
         dataset_path = conf["dataset_path"]
         encodings_path = conf["encodings_path"]
 
-        # Debug: Check dataset folder
+        
         print("Dataset path:", dataset_path)
         print("Subfolders:", os.listdir(dataset_path))
 
-        # Grab all images from subfolders
+        
         imagePaths = list(paths.list_images(dataset_path))
         print("All images found:", imagePaths)
 
@@ -36,14 +36,14 @@ def encode_faces():
             progress_label.config(text=f"Processing image {i+1}/{len(imagePaths)}")
             root.update_idletasks()
 
-            # Person name from folder
+           
             name = os.path.basename(os.path.dirname(imagePath))
 
-            # Load and convert image
+            
             image = cv2.imread(imagePath)
             rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
-            # Encode face
+           
             encodings = face_recognition.face_encodings(rgb)
             if len(encodings) == 0:
                 print(f"⚠️ No face found in {imagePath}, skipping...")
@@ -53,7 +53,7 @@ def encode_faces():
                 knownEncodings.append(encoding)
                 knownNames.append(name)
 
-        # Save encodings
+        
         data = {"encodings": knownEncodings, "names": knownNames}
         os.makedirs(os.path.dirname(encodings_path), exist_ok=True)
         with open(encodings_path, "wb") as f:
@@ -68,7 +68,7 @@ def encode_faces():
 def exit_program():
     root.quit()
 
-# Tkinter UI setup
+
 root = tk.Tk()
 root.title("Face Encoder")
 root.geometry("500x300")
