@@ -12,8 +12,7 @@ from project.utils import Conf
 import os
 from pymongo import MongoClient
 import threading
-import pyttsx3  # For voice alert
-
+import pyttsx3  
 
 conf = Conf("config/config.json")
 recognizer = pickle.loads(open(conf["recognizer_path"], "rb").read())
@@ -204,7 +203,7 @@ def update_frame():
         last_boxes = []
         last_names = []
 
-        detected_faces = []   # NEW LIST for multi-face
+        detected_faces = []   
 
         for encoding, box in zip(encodings, boxes_small):
             preds = recognizer.predict_proba([encoding])[0]
@@ -220,7 +219,7 @@ def update_frame():
 
             detected_faces.append((name, curPerson, box))
 
-        # NOW store attendance for all faces together
+   
         for (name, curPerson, box) in detected_faces:
             attn_info = store_attendance(name, curPerson)
             attendance_label.config(text=f"Status: {attn_info}")
